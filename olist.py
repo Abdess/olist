@@ -1,17 +1,24 @@
 import os
+import time
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import plotly.graph_objs as go
+import seaborn as sns
+import sklearn.cluster as cluster
 from dotenv import load_dotenv
 from plotly.offline import iplot
 from pywaffle import Waffle
-from sklearn.cluster import KMeans
+from scipy.cluster.hierarchy import dendrogram
+from sklearn import decomposition
+from sklearn.preprocessing import StandardScaler
+
+sns.set_context('poster')
+sns.set_color_codes()
+plot_kwds = {'alpha': 0.25, 's': 80, 'linewidths': 0}
 
 load_dotenv()
-
-
-# Rappel convention PEP8 : https://visualgit.readthedocs.io/en/latest/pages/naming_convention.html
 
 
 def assign_frequency(frequency):
@@ -64,10 +71,77 @@ def k_means_func(dataframe, n_clusters):
     - sse - somme des erreurs quadratiques
 
     """
-    k_means = KMeans(n_clusters=n_clusters, random_state=1)
+    k_means = cluster.KMeans(n_clusters=n_clusters, random_state=1)
     k_means.fit(dataframe)
 
     return k_means.inertia_
+
+
+def pca_clusters(dataframe, algorithm, args, kwds):
+    """
+    Fonction permettant de générer une projection PCA de clusters
+    Inspiré de : https://hdbscan.readthedocs.io/en/latest/comparing_clustering_algorithms.html
+
+    Entrée :
+    - dataframe - unscaled dataframe
+    - algorithm - algorithme de clustering
+    - args - arguments de l'algorithme, liste
+    - kwds - paramètres de l'algorithme, dictionnaire
+
+    Sortie :
+    - Aucun (nuage de points 3D interactif)
+    """
+    start_time = time.time()
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(dataframe)
+    labels = algorithm(*args, **kwds).fit_predict(scaled_data)
+    pca = decomposition.PCA(n_components=2).fit(scaled_data)
+    X_projected = pca.transform(scaled_data)
+    pca_df = pd.DataFrame(X_projected)
+    pca_df['cluster'] = labels
+    pca_df.columns = ['x1', 'x2', 'cluster']
+    end_time = time.time()
+    sns.scatterplot(data=pca_df,
+                    x='x1',
+                    y='x2',
+                    hue='cluster',
+                    legend="full",
+                    alpha=0.7).set_title('Clusters trouvés par {}'.format(
+        str(algorithm.__name__)))
+    print(f"Le clustering a pris {round(end_time - start_time)}s")
+
+
+def plot_dendrogram(model, **kwargs):
+    """
+    Fonction établissant une matrice de liaison et trace ensuite le dendrogramme.
+    Source : https://scikit-learn.org/stable/auto_examples/cluster/plot_agglomerative_dendrogram.html
+
+    Entrée :
+    - model - algorithme de clustering
+    - **kwargs - paramètres de l'algorithme
+
+    Sortie :
+    - Aucun (dendrogramme)
+    """
+    # Create linkage matrix and then plot the dendrogram
+
+    # create the counts of samples under each node
+    counts = np.zeros(model.children_.shape[0])
+    n_samples = len(model.labels_)
+    for i, merge in enumerate(model.children_):
+        current_count = 0
+        for child_idx in merge:
+            if child_idx < n_samples:
+                current_count += 1  # leaf node
+            else:
+                current_count += counts[child_idx - n_samples]
+        counts[i] = current_count
+
+    linkage_matrix = np.column_stack(
+        [model.children_, model.distances_, counts]).astype(float)
+
+    # Plot the corresponding dendrogram
+    dendrogram(linkage_matrix, **kwargs)
 
 
 def plot_map(dataframe,
@@ -156,7 +230,7 @@ def plot_waffle_chart(dataframe, metric, agg, title_txt, group='sub_segment'):
                    'loc': 'lower left',
                    'bbox_to_anchor': (1, 0)
                },
-               figsize=(8, 5))
+               figsize=(10, 7))
 
     plt.title(title_txt)
 
@@ -180,7 +254,8 @@ def rfm_assiner(dataframe):
         return 'Dépensier'
     elif (dataframe['score_rfm'] >= 6) and (dataframe['F'] >= 2):
         return 'Fidèle'
-    elif (int(dataframe['segment_RFM']) >= 231) or (dataframe['score_rfm'] >= 6):
+    elif (int(dataframe['segment_RFM']) >= 231) or (dataframe['score_rfm'] >=
+                                                    6):
         return 'Fidélité potentielle'
     elif ((int(dataframe['segment_RFM']) >= 121) and
           (dataframe['R'] == 1)) or dataframe['score_rfm'] == 5:
