@@ -12,6 +12,8 @@ from plotly.offline import iplot
 from pywaffle import Waffle
 from scipy.cluster.hierarchy import dendrogram
 from sklearn import decomposition
+from sklearn.metrics.cluster import adjusted_mutual_info_score
+from sklearn.metrics.cluster import adjusted_rand_score
 from sklearn.preprocessing import StandardScaler
 
 sns.set_context('poster')
@@ -29,7 +31,7 @@ def assign_frequency(frequency):
     - fréquence - commande passée, int
 
     Sortie :
-    - F - score de fréquence
+    - F - score de fréquence, int
 
     """
 
@@ -77,10 +79,56 @@ def k_means_func(dataframe, n_clusters):
     return k_means.inertia_
 
 
+def kmean_time_stability(dataframe, recency_col, n_clusters, ari=True):
+    """
+    Affiche la stabilité dans le temps d'un modèle non supervisé
+    TODO : Améliorer la flexibilité de l'algorithme
+
+    Entrée :
+    - dataframe - unscaled dataframe
+    - recency_col - str, la colonne récence
+    - n_clusters - int, nombre de clusters
+    - ari - bool, choix entre ARI ou AMI
+
+    Sortie :
+    - Liste de score
+    """
+    np.seterr(all='ignore')
+
+    date_init = 365
+    date_slipping = 0
+    date_lim = date_init
+    date_max = dataframe[recency_col].max()
+
+    score = []
+
+    first_year = dataframe[dataframe[recency_col] <= date_init]
+    first_year_scaled = StandardScaler().fit_transform(first_year)
+    first_year_clustered = cluster.KMeans(n_clusters=n_clusters)
+    first_year_clustered.fit(first_year_scaled)
+
+    while date_lim < date_max:
+
+        add_next_month = dataframe[(dataframe[recency_col] >= date_slipping)
+                                   & (dataframe[recency_col] <= date_lim)]
+        add_next_month_scaled = StandardScaler().fit_transform(add_next_month)
+        y_pred = first_year_clustered.predict(add_next_month_scaled)
+        y_label = first_year_clustered.fit(add_next_month_scaled).labels_
+
+        if ari == True:
+            score.append(adjusted_rand_score(y_pred, y_label))
+        else:
+            score.append(adjusted_mutual_info_score(y_pred, y_label))
+
+        date_lim += 30
+        date_slipping += 30
+
+    return score[::-1]
+
+
 def pca_clusters(dataframe, algorithm, args, kwds):
     """
     Fonction permettant de générer une projection PCA de clusters
-    Inspiré de : https://hdbscan.readthedocs.io/en/latest/comparing_clustering_algorithms.html
 
     Entrée :
     - dataframe - unscaled dataframe
@@ -117,7 +165,7 @@ def plot_dendrogram(model, **kwargs):
     Source : https://scikit-learn.org/stable/auto_examples/cluster/plot_agglomerative_dendrogram.html
 
     Entrée :
-    - model - algorithme de clustering
+    - model - fct, algorithme de clustering
     - **kwargs - paramètres de l'algorithme
 
     Sortie :
@@ -156,18 +204,18 @@ def plot_map(dataframe,
 
     Entrée :
     - dataframe - dataframe avec la feature target
-        (métrique ; champ de code couleur nécessaire si sous_segment à visualiser)
-    - title - texte à afficher comme titre du graphique
-    - lower_bound - seuil inférieur de l'échelle de couleurs
-    - upper_bound - seuil supérieur de l'échelle de couleurs
-    - metric - caractéristique/ métrique kpi à visualiser
+        (métrique ; champ de code couleur nécessaire si sous_segment à visualiser), df
+    - title - texte à afficher comme titre du graphique, str
+    - lower_bound - seuil inférieur de l'échelle de couleurs, int
+    - upper_bound - seuil supérieur de l'échelle de couleurs, int
+    - metric - feature / métrique kpi à visualiser, str
     - is_sub_segment - booléen,
         si "True" : le sous-segment sera visualisé avec un code couleur,
         si "False", valeur conforme à la couleur
-    - marker_size - taille du marqueur
+    - marker_size - taille du marqueur, int
 
     Sortie :
-    - Visualisation des données géographiques
+    - Visualisation des données géographiques, plot
 
     """
 
@@ -230,7 +278,7 @@ def plot_waffle_chart(dataframe, metric, agg, title_txt, group='sub_segment'):
                    'loc': 'lower left',
                    'bbox_to_anchor': (1, 0)
                },
-               figsize=(10, 7))
+               figsize=(15, 7))
 
     plt.title(title_txt)
 
